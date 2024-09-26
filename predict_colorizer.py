@@ -1,40 +1,39 @@
-import numpy as np
+import os
 import cv2
+import numpy as np
 from tensorflow.keras.models import load_model
 
-# Function to load a single image for prediction
-def load_image(image_path, target_size=(256, 256)):
-    img = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
-    img = cv2.resize(img, target_size)
-    img = np.expand_dims(img, axis=-1)  # Add channel dimension
-    img = np.expand_dims(img, axis=0)   # Add batch dimension
-    return img / 255.0  # Normalize
+# Configurations
+IMAGE_HEIGHT = 256
+IMAGE_WIDTH = 256
+SAR_CHANNELS = 1  # Grayscale input for SAR
 
-# Function to save the colorized output
-def save_output(output, save_path):
-    output = (output * 255).astype(np.uint8)
-    cv2.imwrite(save_path, output)
+# Load the trained model
+model = load_model('sar_colorization_model.h5')
 
-# Function to perform prediction
-def predict_colorize(image_path, model_path, save_path):
-    # Load model
-    model = load_model(model_path, compile=False)
+# Preprocess SAR image for prediction
+def preprocess_image(image_path):
+    image = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
+    image = cv2.resize(image, (IMAGE_WIDTH, IMAGE_HEIGHT))
+    image = image.astype(np.float32) / 255.0
+    return image[np.newaxis, ..., np.newaxis]  # Add batch and channel dimensions
 
-    # Load image
-    img = load_image(image_path)
-    
-    # Predict and colorize
-    prediction = model.predict(img)[0]
-    
-    # Save the output image
-    save_output(prediction, save_path)
-    print(f"Colorized image saved to: {save_path}")
+# Post-process and save the colorized image
+def save_colorized_image(image, output_path):
+    image = np.clip(image[0], 0, 1) * 255.0  # Convert back to [0, 255]
+    image = image.astype(np.uint8)
+    cv2.imwrite(output_path, cv2.cvtColor(image, cv2.COLOR_RGB2BGR))
+    print(f"Colorized image saved at: {output_path}")
 
-# Example usage
-if __name__ == "__main__":
-    input_image = "path_to_your_input_sar_image.png"  # Grayscale SAR image path
-    output_image = "path_to_save_colorized_image.png"  # Output path
-    model_file = "colorizer_model.h5"  # Trained model file
+# Main function to colorize a given SAR image
+def colorize_image(input_image_path, output_image_path):
+    input_image = preprocess_image(input_image_path)
+    predicted_color = model.predict(input_image)
+    save_colorized_image(predicted_color, output_image_path)
 
-    # Perform colorization
-    predict_colorize(input_image, model_file, output_image)
+if __name__ == '__main__':
+    # Input and output paths for the SAR image and the colorized output
+    input_sar_image = 'path_to_input_sar_image/sar_image.png'  # Specify the path to the input SAR image
+    output_color_image = 'path_to_output_image/colorized_output.png'  # Specify the output path
+
+    colorize_image(input_sar_image, output_color_image)
