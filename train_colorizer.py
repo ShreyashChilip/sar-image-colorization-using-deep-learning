@@ -1,77 +1,96 @@
 import os
-import numpy as np
 import cv2
-from glob import glob
+import numpy as np
 import tensorflow as tf
-from tensorflow.keras.layers import Conv2D, UpSampling2D, Input, Add
+from tensorflow.keras.layers import Conv2D, MaxPooling2D, UpSampling2D, Input, Concatenate
 from tensorflow.keras.models import Model
-from tensorflow.keras.callbacks import ModelCheckpoint, EarlyStopping
 from sklearn.model_selection import train_test_split
 
-# Set random seed for reproducibility
-tf.random.set_seed(42)
-np.random.seed(42)
+# Configurations
+IMAGE_HEIGHT = 256
+IMAGE_WIDTH = 256
+SAR_CHANNELS = 1  # SAR images are grayscale
+COLOR_CHANNELS = 3  # RGB output channels
 
-# Function to load and preprocess images
-def load_data(image_path, target_size=(256, 256)):
-    image_files = glob(os.path.join(image_path, "*.png"))
-    images = []
-    for file in image_files:
-        img = cv2.imread(file, cv2.IMREAD_GRAYSCALE)  # Load as grayscale
-        img = cv2.resize(img, target_size)
-        images.append(img)
-    return np.array(images, dtype=np.float32) / 255.0  # Normalize to [0, 1]
-
-# Custom loss function to encourage better colorization and noise removal
-def custom_loss(y_true, y_pred):
-    return tf.reduce_mean(tf.square(y_true - y_pred))
-
-# U-Net-like architecture for colorization and denoising
-def build_colorizer(input_shape=(256, 256, 1)):
+# Define U-Net Model Architecture
+def build_unet(input_shape=(IMAGE_HEIGHT, IMAGE_WIDTH, SAR_CHANNELS)):
     inputs = Input(shape=input_shape)
+
+    # Encoder (Downsampling)
+    conv1 = Conv2D(64, (3, 3), activation='relu', padding='same')(inputs)
+    conv1 = Conv2D(64, (3, 3), activation='relu', padding='same')(conv1)
+    pool1 = MaxPooling2D(pool_size=(2, 2))(conv1)
+
+    conv2 = Conv2D(128, (3, 3), activation='relu', padding='same')(pool1)
+    conv2 = Conv2D(128, (3, 3), activation='relu', padding='same')(conv2)
+    pool2 = MaxPooling2D(pool_size=(2, 2))(conv2)
+
+    # Bottleneck
+    conv3 = Conv2D(256, (3, 3), activation='relu', padding='same')(pool2)
+
+    # Decoder (Upsampling)
+    up1 = UpSampling2D(size=(2, 2))(conv3)
+    up1 = Conv2D(128, (3, 3), activation='relu', padding='same')(up1)
+    merge1 = Concatenate()([up1, conv2])
+
+    up2 = UpSampling2D(size=(2, 2))(merge1)
+    up2 = Conv2D(64, (3, 3), activation='relu', padding='same')(up2)
+    merge2 = Concatenate()([up2, conv1])
+
+    # Output Layer for Colorization
+    output = Conv2D(COLOR_CHANNELS, (1, 1), activation='sigmoid')(merge2)
+
+    return Model(inputs, output)
+
+# Data Preparation
+def load_image_pairs(sar_image_dir, color_image_dir):
+    sar_images = []
+    color_images = []
     
-    # Encoder: Downsampling
-    x1 = Conv2D(64, (3, 3), activation='relu', padding='same')(inputs)
-    x1 = Conv2D(64, (3, 3), activation='relu', padding='same', strides=(2, 2))(x1)  # Downsample
-    
-    x2 = Conv2D(128, (3, 3), activation='relu', padding='same')(x1)
-    x2 = Conv2D(128, (3, 3), activation='relu', padding='same', strides=(2, 2))(x2)  # Downsample
-    
-    # Decoder: Upsampling
-    x3 = UpSampling2D((2, 2))(x2)
-    x3 = Conv2D(64, (3, 3), activation='relu', padding='same')(x3)
-    
-    x4 = UpSampling2D((2, 2))(x3)
-    x4 = Conv2D(32, (3, 3), activation='relu', padding='same')(x4)
-    
-    # Output colorized layer (3 channels for RGB output)
-    outputs = Conv2D(3, (1, 1), activation='sigmoid', padding='same')(x4)
-    
-    # Residual connection for denoising
-    denoised = Add()([outputs, Conv2D(3, (1, 1), activation='linear', padding='same')(x4)])
-    
-    model = Model(inputs, denoised)
-    return model
+    # List of all SAR images in the folder
+    for filename in os.listdir(sar_image_dir):
+        if filename.endswith('.png'):
+            # Load SAR image
+            sar_path = os.path.join(sar_image_dir, filename)
+            sar_image = cv2.imread(sar_path, cv2.IMREAD_GRAYSCALE)
+            sar_image = cv2.resize(sar_image, (IMAGE_WIDTH, IMAGE_HEIGHT))
+            sar_image = sar_image.astype(np.float32) / 255.0  # Normalize to [0, 1]
+            
+            # Load corresponding color image
+            color_path = os.path.join(color_image_dir, filename)
+            if os.path.exists(color_path):
+                color_image = cv2.imread(color_path)
+                color_image = cv2.resize(color_image, (IMAGE_WIDTH, IMAGE_HEIGHT))
+                color_image = color_image.astype(np.float32) / 255.0  # Normalize to [0, 1]
+
+                # Add images to lists
+                sar_images.append(sar_image[..., np.newaxis])  # Add channel dimension for SAR
+                color_images.append(color_image)
+
+    # Convert lists to numpy arrays
+    return np.array(sar_images), np.array(color_images)
 
 def main():
-    # Load dataset
-    image_path = "path_to_your_sar_images"
-    images = load_data(image_path)
-    images = np.expand_dims(images, axis=-1)  # Add channel dimension
+    # Directory paths
+    sar_image_dir = 'path_to_sar_images'  # e.g., './data/sar_images'
+    color_image_dir = 'path_to_color_images'  # e.g., './data/color_images'
+    
+    # Load paired images
+    X, y = load_image_pairs(sar_image_dir, color_image_dir)
+    
+    # Train-Test Split
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
-    # Split into training and validation sets
-    X_train, X_val = train_test_split(images, test_size=0.2, random_state=42)
+    # Create Model
+    model = build_unet()
+    model.compile(optimizer='adam', loss='mse', metrics=['accuracy'])
 
-    # Build the model
-    model = build_colorizer(input_shape=(256, 256, 1))
-    model.compile(optimizer='adam', loss=custom_loss)
+    # Train Model
+    model.fit(X_train, y_train, batch_size=16, epochs=50, validation_data=(X_test, y_test))
 
-    # Set up callbacks
-    checkpoint = ModelCheckpoint("colorizer_model.h5", monitor='val_loss', save_best_only=True, mode='min')
-    early_stopping = EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True)
+    # Save Model
+    model.save('sar_colorization_model.h5')
+    print("Model saved as 'sar_colorization_model.h5'")
 
-    # Train the model
-    model.fit(X_train, X_train, validation_data=(X_val, X_val), epochs=50, batch_size=8, callbacks=[checkpoint, early_stopping])
-
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()
