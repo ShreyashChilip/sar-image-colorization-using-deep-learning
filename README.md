@@ -29,7 +29,7 @@ SAR images are typically grayscale and lack natural color information. This proj
 - **Visualization Tools:** Provides scripts to compare grayscale SAR images with their colorized outputs.
 
 ## Project Structure
-Create the followinf structure with custom dataset to train the colorizer model.
+Create the following structure with custom dataset to train the colorizer model.
 ```
 SAR-Image-Colorization/
 ├── datasets/
