@@ -7,14 +7,7 @@ A deep learning-based project for colorizing Synthetic Aperture Radar (SAR) imag
 - [Overview](#overview)
 - [Features](#features)
 - [Project Structure](#project-structure)
-- [Installation](#installation)
-- [Dataset Preparation](#dataset-preparation)
-- [Model Training](#model-training)
-- [Inference & Testing](#inference--testing)
-- [Visualization](#visualization)
-- [Configuration](#configuration)
-- [Dependencies](#dependencies)
-- [Results](#results)
+
 - [License](#license)
 
 ## Overview
